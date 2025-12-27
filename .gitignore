@@ -1,0 +1,6 @@
+.env
+backups/
+*.tar.gz
+grafana/provisioning/dashboards/json/*.json
+prometheus-data/
+*.log

@@ -1,0 +1,250 @@
+networks:
+  monitoring:
+    driver: bridge
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.8.1
+    container_name: prometheus
+    user: "65534:65534"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=${PROMETHEUS_RETENTION:-15d}'
+      - '--storage.tsdb.wal-compression'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - monitoring
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '${PROMETHEUS_CPU_LIMIT:-1.0}'
+          memory: ${PROMETHEUS_MEM_LIMIT:-1G}
+        reservations:
+          cpus: '${PROMETHEUS_CPU_RESERVE:-0.5}'
+          memory: ${PROMETHEUS_MEM_RESERVE:-512M}
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: ${HEALTHCHECK_INTERVAL:-30s}
+      timeout: ${HEALTHCHECK_TIMEOUT:-10s}
+      retries: ${HEALTHCHECK_RETRIES:-3}
+      start_period: 30s
+
+  grafana:
+    image: grafana/grafana:12.3
+    container_name: grafana
+    user: "472:472"
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GF_ADMIN_USER:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_ADMIN_PASSWORD:-myPass!@123}
+      - GF_AUTH_ANONYMOUS_ENABLED=false
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_ANALYTICS_REPORTING_ENABLED=false
+      - GF_ANALYTICS_CHECK_FOR_UPDATES=false
+      - GF_SERVER_ROOT_URL=${GF_SERVER_ROOT_URL:-http://localhost:4007}
+      - GF_SERVER_SERVE_FROM_SUB_PATH=false
+      # Logging
+      - GF_LOG_MODE=console
+      - GF_LOG_LEVEL=warn
+      # Enable provisioning
+      - GF_PATHS_PROVISIONING=/etc/grafana/provisioning
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/provisioning/dashboards/json:/etc/grafana/provisioning/dashboards/json:ro
+    ports:
+      - "${GRAFANA_PORT:-4007}:3000"
+    networks:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '${GRAFANA_CPU_LIMIT:-0.5}'
+          memory: ${GRAFANA_MEM_LIMIT:-512M}
+        reservations:
+          cpus: '${GRAFANA_CPU_RESERVE:-0.2}'
+          memory: ${GRAFANA_MEM_RESERVE:-256M}
+    healthcheck:
+      test: ["CMD-SHELL", "wget --quiet --tries=1 --spider http://localhost:3000/api/health || exit 1"]
+      interval: ${HEALTHCHECK_INTERVAL:-30s}
+      timeout: ${HEALTHCHECK_TIMEOUT:-10s}
+      retries: ${HEALTHCHECK_RETRIES:-3}
+      start_period: 40s
+
+  node-exporter:
+    image: prom/node-exporter:v1.8.2
+    container_name: node-exporter
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/rootfs'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+      - '--collector.netclass.ignored-devices=^(veth.*|br.*|docker.*|lo)$'
+      - '--collector.netdev.device-exclude=^(veth.*|br.*|docker.*|lo)$'
+      - '--collector.cpu'
+      - '--collector.loadavg'
+      - '--collector.meminfo'
+      - '--collector.diskstats'
+      - '--collector.filesystem'
+      - '--collector.netdev'
+      - '--collector.netstat'
+      - '--collector.vmstat'
+      - '--no-collector.arp'
+      - '--no-collector.bcache'
+      - '--no-collector.bonding'
+      - '--no-collector.btrfs'
+      - '--no-collector.conntrack'
+      - '--no-collector.edac'
+      - '--no-collector.entropy'
+      - '--no-collector.fibrechannel'
+      - '--no-collector.hwmon'
+      - '--no-collector.infiniband'
+      - '--no-collector.ipvs'
+      - '--no-collector.mdadm'
+      - '--no-collector.nfs'
+      - '--no-collector.nfsd'
+      - '--no-collector.powersupplyclass'
+      - '--no-collector.pressure'
+      - '--no-collector.rapl'
+      - '--no-collector.schedstat'
+      - '--no-collector.sockstat'
+      - '--no-collector.softnet'
+      - '--no-collector.stat'
+      - '--no-collector.tapestats'
+      - '--no-collector.textfile'
+      - '--no-collector.thermal_zone'
+      - '--no-collector.time'
+      - '--no-collector.timex'
+      - '--no-collector.udp_queues'
+      - '--no-collector.uname'
+      - '--no-collector.xfs'
+      - '--no-collector.zfs'
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      - monitoring
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '${NODE_EXPORTER_CPU_LIMIT:-0.2}'
+          memory: ${NODE_EXPORTER_MEM_LIMIT:-256M}
+        reservations:
+          cpus: '${NODE_EXPORTER_CPU_RESERVE:-0.1}'
+          memory: ${NODE_EXPORTER_MEM_RESERVE:-128M}
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9100/metrics"]
+      interval: ${HEALTHCHECK_INTERVAL:-30s}
+      timeout: ${HEALTHCHECK_TIMEOUT:-10s}
+      retries: ${HEALTHCHECK_RETRIES:-3}
+      start_period: 10s
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: cadvisor
+    command:
+      - '--housekeeping_interval=30s'
+      - '--max_housekeeping_interval=35s'
+      - '--event_storage_event_limit=default=0'
+      - '--event_storage_age_limit=default=0'
+      - '--disable_metrics=percpu,sched,tcp,udp,disk,diskIO,hugetlb,referenced_memory,cpu_topology,resctrl'
+      - '--store_container_labels=false'
+      - '--docker_only=true'
+      - '--allow_dynamic_housekeeping=true'
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+      - /dev/disk/:/dev/disk:ro
+    networks:
+      - monitoring
+    restart: unless-stopped
+    privileged: true
+    devices:
+      - /dev/kmsg:/dev/kmsg
+    deploy:
+      resources:
+        limits:
+          cpus: '${CADVISOR_CPU_LIMIT:-0.4}'
+          memory: ${CADVISOR_MEM_LIMIT:-512M}
+        reservations:
+          cpus: '${CADVISOR_CPU_RESERVE:-0.2}'
+          memory: ${CADVISOR_MEM_RESERVE:-256M}
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/healthz"]
+      interval: ${HEALTHCHECK_INTERVAL:-30s}
+      timeout: ${HEALTHCHECK_TIMEOUT:-10s}
+      retries: ${HEALTHCHECK_RETRIES:-3}
+      start_period: 30s
+
+  loki:
+    image: grafana/loki:2.8.11
+    container_name: loki
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki-data:/loki
+    networks:
+      - monitoring
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '${LOKI_CPU_LIMIT:-0.5}'
+          memory: ${LOKI_MEM_LIMIT:-512M}
+        reservations:
+          cpus: '${LOKI_CPU_RESERVE:-0.2}'
+          memory: ${LOKI_MEM_RESERVE:-256M}
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3100/ready"]
+      interval: ${HEALTHCHECK_INTERVAL:-30s}
+      timeout: ${HEALTHCHECK_TIMEOUT:-10s}
+      retries: ${HEALTHCHECK_RETRIES:-3}
+      start_period: 30s
+
+  promtail:
+    image: grafana/promtail:2.8.11
+    container_name: promtail
+    volumes:
+      - ./promtail/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/config.yml
+    networks:
+      - monitoring
+    restart: unless-stopped
+    depends_on:
+      loki:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '${PROMTAIL_CPU_LIMIT:-0.2}'
+          memory: ${PROMTAIL_MEM_LIMIT:-256M}
+        reservations:
+          cpus: '${PROMTAIL_CPU_RESERVE:-0.1}'
+          memory: ${PROMTAIL_MEM_RESERVE:-128M}
+
+volumes:
+  prometheus-data:
+    driver: local
+  
+  grafana-data:
+    driver: local
+  
+  loki-data:
+    driver: local

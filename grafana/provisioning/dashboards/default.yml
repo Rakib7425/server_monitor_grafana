@@ -1,0 +1,39 @@
+apiVersion: 1
+
+providers:
+  - name: "Default"
+    orgId: 1
+    folder: "Monitoring"
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json
+      foldersFromFilesStructure: true
+# ============================================
+# RECOMMENDED DASHBOARDS TO IMPORT
+# ============================================
+#
+# Visit Grafana UI → Dashboards → Import → Enter ID:
+#
+# 1. Node Exporter Full (ID: 1860)
+#    - Comprehensive host metrics
+#    - CPU, Memory, Disk, Network
+#
+# 2. Docker Container & Host Metrics (ID: 179)
+#    - Container-level metrics
+#    - Resource usage per container
+#
+# 3. cAdvisor Exporter (ID: 14282)
+#    - Detailed container monitoring
+#    - Per-container CPU/Memory/Network
+#
+# 4. Prometheus Stats (ID: 2)
+#    - Prometheus self-monitoring
+#    - Scrape performance, TSDB stats
+#
+# OR download JSON and place in:
+# ./grafana/provisioning/dashboards/json/
+#
+# ============================================

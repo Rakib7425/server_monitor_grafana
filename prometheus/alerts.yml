@@ -1,0 +1,255 @@
+groups:
+  - name: container_health
+    interval: 30s
+    rules:
+      # Alert when a container is down
+      - alert: ContainerDown
+        expr: |
+          time() - container_last_seen{name!~"POD|k8s_.*"} > 60
+        for: 2m
+        labels:
+          severity: critical
+          component: docker
+        annotations:
+          summary: "Container {{ $labels.name }} is down"
+          description: "Container {{ $labels.name }} on {{ $labels.instance }} has been down for more than 2 minutes.\nCurrent state: DOWN for {{ $value }}s"
+
+      # Alert when container restarts frequently
+      - alert: ContainerRestartingFrequently
+        expr: |
+          rate(container_last_seen{name!~"POD|k8s_.*"}[15m]) > 2
+        for: 5m
+        labels:
+          severity: warning
+          component: docker
+        annotations:
+          summary: "Container {{ $labels.name }} is restarting frequently"
+          description: "Container {{ $labels.name }} has restarted {{ $value }} times in the last 15 minutes."
+
+  # ------------------------------------------
+  # GROUP: CPU Alerts
+  # ------------------------------------------
+  - name: cpu_alerts
+    interval: 30s
+    rules:
+      # High CPU usage on host
+      - alert: HostHighCpuUsage
+        expr: |
+          100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: host
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is above 80% (current: {{ $value | humanize }}%)\nThis has persisted for 5 minutes."
+
+      # Critical CPU usage on host
+      - alert: HostCriticalCpuUsage
+        expr: |
+          100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 95
+        for: 3m
+        labels:
+          severity: critical
+          component: host
+        annotations:
+          summary: "CRITICAL: CPU usage on {{ $labels.instance }}"
+          description: "CPU usage is above 95% (current: {{ $value | humanize }}%)\nImmediate action required!"
+
+      # High CPU usage per container
+      - alert: ContainerHighCpuUsage
+        expr: |
+          rate(container_cpu_usage_seconds_total{name!~"POD|k8s_.*"}[5m]) * 100 > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: docker
+        annotations:
+          summary: "Container {{ $labels.name }} has high CPU usage"
+          description: "Container {{ $labels.name }} CPU usage is {{ $value | humanize }}%"
+
+  # ------------------------------------------
+  # GROUP: Memory Alerts
+  # ------------------------------------------
+  - name: memory_alerts
+    interval: 30s
+    rules:
+      # High memory usage on host
+      - alert: HostHighMemoryUsage
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          component: host
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: "Memory usage is above 85% (current: {{ $value | humanize }}%)"
+
+      # Critical memory usage on host
+      - alert: HostCriticalMemoryUsage
+        expr: |
+          (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 95
+        for: 2m
+        labels:
+          severity: critical
+          component: host
+        annotations:
+          summary: "CRITICAL: Memory usage on {{ $labels.instance }}"
+          description: "Memory usage is above 95% (current: {{ $value | humanize }}%)\nRisk of OOM killer!"
+
+      # Container memory usage warning
+      - alert: ContainerHighMemoryUsage
+        expr: |
+          (container_memory_working_set_bytes{name!~"POD|k8s_.*"} / container_spec_memory_limit_bytes{name!~"POD|k8s_.*"}) * 100 > 85
+        for: 5m
+        labels:
+          severity: warning
+          component: docker
+        annotations:
+          summary: "Container {{ $labels.name }} high memory usage"
+          description: "Container {{ $labels.name }} is using {{ $value | humanize }}% of its memory limit"
+
+  # ------------------------------------------
+  # GROUP: Disk Space Alerts
+  # ------------------------------------------
+  - name: disk_alerts
+    interval: 60s
+    rules:
+      # Low disk space warning
+      - alert: HostLowDiskSpace
+        expr: |
+          (node_filesystem_avail_bytes{mountpoint="/",fstype!="rootfs"} / node_filesystem_size_bytes{mountpoint="/",fstype!="rootfs"}) * 100 < 20
+        for: 5m
+        labels:
+          severity: warning
+          component: host
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }}"
+          description: "Disk space on {{ $labels.mountpoint }} is below 20% ({{ $value | humanize }}% remaining)"
+
+      # Critical low disk space
+      - alert: HostCriticalDiskSpace
+        expr: |
+          (node_filesystem_avail_bytes{mountpoint="/",fstype!="rootfs"} / node_filesystem_size_bytes{mountpoint="/",fstype!="rootfs"}) * 100 < 10
+        for: 2m
+        labels:
+          severity: critical
+          component: host
+        annotations:
+          summary: "CRITICAL: Disk space on {{ $labels.instance }}"
+          description: "Disk space on {{ $labels.mountpoint }} is below 10% ({{ $value | humanize }}% remaining)\nCleanup required immediately!"
+
+      # Docker volume low space
+      - alert: DockerVolumeLowSpace
+        expr: |
+          (node_filesystem_avail_bytes{mountpoint=~"/var/lib/docker.*"} / node_filesystem_size_bytes{mountpoint=~"/var/lib/docker.*"}) * 100 < 15
+        for: 5m
+        labels:
+          severity: warning
+          component: docker
+        annotations:
+          summary: "Docker volume low on space"
+          description: "Docker volume {{ $labels.mountpoint }} has only {{ $value | humanize }}% space remaining"
+
+  # ------------------------------------------
+  # GROUP: Prometheus Health
+  # ------------------------------------------
+  - name: prometheus_health
+    interval: 30s
+    rules:
+      # Scrape target down
+      - alert: PrometheusTargetDown
+        expr: up == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: prometheus
+        annotations:
+          summary: "Prometheus target {{ $labels.job }} is down"
+          description: "Target {{ $labels.job }} on {{ $labels.instance }} has been down for 2 minutes"
+
+      # Prometheus scrape duration high
+      - alert: PrometheusSlowScrapes
+        expr: |
+          prometheus_target_interval_length_seconds{quantile="0.99"} > 60
+        for: 5m
+        labels:
+          severity: warning
+          component: prometheus
+        annotations:
+          summary: "Prometheus scrapes are slow"
+          description: "Prometheus is taking {{ $value }}s to scrape {{ $labels.job }}"
+
+      # TSDB compaction failures
+      - alert: PrometheusTsdbCompactionsFailed
+        expr: |
+          rate(prometheus_tsdb_compactions_failed_total[5m]) > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: prometheus
+        annotations:
+          summary: "Prometheus TSDB compaction failures"
+          description: "Prometheus TSDB compactions are failing at {{ $value }} failures/sec"
+
+  # ------------------------------------------
+  # GROUP: Network Alerts
+  # ------------------------------------------
+  - name: network_alerts
+    interval: 60s
+    rules:
+      # High network receive
+      - alert: HostHighNetworkReceive
+        expr: |
+          rate(node_network_receive_bytes_total{device!~"lo|veth.*|docker.*|br-.*"}[5m]) > 100 * 1024 * 1024
+        for: 5m
+        labels:
+          severity: warning
+          component: network
+        annotations:
+          summary: "High network receive on {{ $labels.instance }}"
+          description: "Interface {{ $labels.device }} is receiving {{ $value | humanize }}B/s"
+
+      # High network transmit
+      - alert: HostHighNetworkTransmit
+        expr: |
+          rate(node_network_transmit_bytes_total{device!~"lo|veth.*|docker.*|br-.*"}[5m]) > 100 * 1024 * 1024
+        for: 5m
+        labels:
+          severity: warning
+          component: network
+        annotations:
+          summary: "High network transmit on {{ $labels.instance }}"
+          description: "Interface {{ $labels.device }} is transmitting {{ $value | humanize }}B/s"
+# ============================================
+# ALERT CONFIGURATION GUIDE
+# ============================================
+#
+# To enable alerting, you need Alertmanager:
+#
+# 1. Add Alertmanager to docker-compose.yml:
+#    alertmanager:
+#      image: prom/alertmanager:latest
+#      ports:
+#        - "9093:9093"
+#      volumes:
+#        - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+#
+# 2. Create alertmanager/alertmanager.yml:
+#    route:
+#      receiver: 'telegram'
+#      group_wait: 30s
+#      group_interval: 5m
+#      repeat_interval: 4h
+#
+#    receivers:
+#      - name: 'telegram'
+#        telegram_configs:
+#          - bot_token: 'YOUR_BOT_TOKEN'
+#            chat_id: YOUR_CHAT_ID
+#            parse_mode: 'HTML'
+#
+# 3. Update prometheus.yml alerting section with Alertmanager target
+#
+# ============================================

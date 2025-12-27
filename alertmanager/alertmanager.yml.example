@@ -1,0 +1,156 @@
+# ============================================
+# OPTIONAL: ALERTMANAGER CONFIGURATION
+# ============================================
+# 
+# To enable alerting, add Alertmanager to docker-compose.yml:
+# 
+# alertmanager:
+#   image: prom/alertmanager:v0.27.0
+#   container_name: alertmanager
+#   volumes:
+#     - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+#     - alertmanager-data:/alertmanager
+#   networks:
+#     - monitoring
+#   restart: unless-stopped
+#   deploy:
+#     resources:
+#       limits:
+#         cpus: '0.2'
+#         memory: 256M
+# 
+# Then update prometheus.yml alerting section with:
+# - targets: ['alertmanager:9093']
+# 
+# ============================================
+
+global:
+  # How long to wait before sending notification about new alerts
+  resolve_timeout: 5m
+
+# Route tree
+route:
+  # Root route - catch all
+  receiver: 'default-receiver'
+  group_by: ['alertname', 'cluster', 'service']
+  
+  # Wait time before sending first notification
+  group_wait: 30s
+  
+  # Wait time before sending notification about new alerts in the same group
+  group_interval: 5m
+  
+  # Wait time before sending notification about already sent alert
+  repeat_interval: 4h
+  
+  # Child routes
+  routes:
+    # Critical alerts - immediate notification
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 10s
+      repeat_interval: 1h
+    
+    # Warning alerts - grouped notification
+    - match:
+        severity: warning
+      receiver: 'warning-alerts'
+      group_wait: 1m
+      repeat_interval: 4h
+
+# Inhibition rules - suppress certain alerts when others are firing
+inhibit_rules:
+  # Suppress warning if critical is firing for same alert
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance']
+
+# ============================================
+# RECEIVERS CONFIGURATION
+# ============================================
+
+receivers:
+  # Default receiver (fallback)
+  - name: 'default-receiver'
+    # No notifications for default
+    
+  # Critical alerts receiver
+  - name: 'critical-alerts'
+    # Uncomment and configure your preferred method:
+    
+    # TELEGRAM
+    telegram_configs:
+      - bot_token: 'YOUR_BOT_TOKEN_HERE'
+        chat_id: YOUR_CHAT_ID_HERE
+        parse_mode: 'HTML'
+        message: |
+          🚨 <b>CRITICAL ALERT</b> 🚨
+          
+          <b>Alert:</b> {{ .GroupLabels.alertname }}
+          <b>Severity:</b> {{ .CommonLabels.severity }}
+          <b>Instance:</b> {{ .CommonLabels.instance }}
+          
+          <b>Summary:</b> {{ .CommonAnnotations.summary }}
+          <b>Description:</b> {{ .CommonAnnotations.description }}
+          
+          <b>Time:</b> {{ .StartsAt.Format "2006-01-02 15:04:05" }}
+    
+    # EMAIL (alternative/additional)
+    # email_configs:
+    #   - to: 'alerts@yourdomain.com'
+    #     from: 'prometheus@yourdomain.com'
+    #     smarthost: 'smtp.gmail.com:587'
+    #     auth_username: 'your-email@gmail.com'
+    #     auth_password: 'your-app-password'
+    #     headers:
+    #       Subject: '🚨 CRITICAL: {{ .GroupLabels.alertname }}'
+    
+    # SLACK (alternative/additional)
+    # slack_configs:
+    #   - api_url: 'https://hooks.slack.com/services/YOUR/WEBHOOK/URL'
+    #     channel: '#alerts-critical'
+    #     title: '🚨 Critical Alert'
+    #     text: '{{ range .Alerts }}{{ .Annotations.summary }}\n{{ end }}'
+    
+    # WEBHOOK (for custom integrations)
+    # webhook_configs:
+    #   - url: 'http://your-webhook-endpoint/alert'
+    #     send_resolved: true
+  
+  # Warning alerts receiver
+  - name: 'warning-alerts'
+    telegram_configs:
+      - bot_token: 'YOUR_BOT_TOKEN_HERE'
+        chat_id: YOUR_CHAT_ID_HERE
+        parse_mode: 'HTML'
+        message: |
+          ⚠️ <b>Warning</b>
+          
+          <b>Alert:</b> {{ .GroupLabels.alertname }}
+          <b>Instance:</b> {{ .CommonLabels.instance }}
+          <b>Summary:</b> {{ .CommonAnnotations.summary }}
+
+# ============================================
+# TELEGRAM BOT SETUP INSTRUCTIONS
+# ============================================
+# 
+# 1. Create a bot:
+#    - Message @BotFather on Telegram
+#    - Send: /newbot
+#    - Follow instructions to get your BOT_TOKEN
+# 
+# 2. Get your Chat ID:
+#    - Message your bot
+#    - Visit: https://api.telegram.org/bot<BOT_TOKEN>/getUpdates
+#    - Look for "chat":{"id": YOUR_CHAT_ID
+# 
+# 3. Update this file with your credentials
+# 
+# 4. Test:
+#    - Restart Alertmanager
+#    - Trigger a test alert in Prometheus
+# 
+# ============================================
