@@ -1,4 +1,4 @@
-# .env
+.env
 backups/
 *.tar.gz
 grafana/provisioning/dashboards/json/*.json
